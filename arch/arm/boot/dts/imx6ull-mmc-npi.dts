@@ -60,7 +60,7 @@
 			off-on-delay = <20000>;
 			enable-active-high;
 		};
-/*
+	/*
 		reg_gpio_dvfs: regulator-gpio {
 			compatible = "regulator-gpio";
 			pinctrl-names = "default";
@@ -72,20 +72,104 @@
 			gpios = <&gpio5 3 GPIO_ACTIVE_HIGH>;
 			states = <1300000 0x1 1400000 0x0>;
 		};
-*/
+	*/
 	};
 
+	/*
+	 * ================================================================
+	 * LED 节点组 — 使用 gpio-leds 驱动 (drivers/leds/leds-gpio.c)
+	 * ================================================================
+	 * compatible = "gpio-leds" 让 Linux 内核的 leds-gpio 驱动接管此节点。
+	 * 每个子节点代表一个独立 LED，由内核 LED 子系统统一管理，
+	 * 最终生成 /sys/class/leds/<label>/ 用户空间接口。
+	 */
 	leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_led>;
+		/*
+		 * pinctrl-0 可以列出多个引脚配置节点，bootloader 会逐一应用。
+		 * 每个 <&phandle> 指向 &iomuxc 中通过 pinctrl_xxx: 标签定义的节点。
+		 */
+		pinctrl-0 = <&pinctrl_led>,
+			    <&pinctrl_my_led>;
 
+		/*
+		 * 系统心跳灯，使用 SNVS_TAMPER3 → GPIO5_IO03
+		 * 该 LED 会随内核心跳自动闪烁，无需用户空间程序干预。
+		 */
 		led0: cpu {
 			label = "cpu";
+			/*
+			 * gpios 三要素（定义在 include/dt-bindings/gpio/gpio.h）：
+			 *   <&gpio5>  — GPIO 控制器 phandle (gpio5 = GPIO Bank 5)
+			 *   3         — GPIO 控制器内的引脚索引 (0~31)
+			 *   GPIO_ACTIVE_LOW (值为1) — LED 低电平点亮，高电平熄灭
+			 *     引用自: dt-bindings/gpio/gpio.h:#define GPIO_ACTIVE_LOW 1
+			 */
 			gpios = <&gpio5 3 GPIO_ACTIVE_LOW>;
+			/*
+			 * default-state = "on" → 内核启动后到 trigger 接管前，
+			 * LED 默认保持点亮状态。
+			 */
 			default-state = "on";
+			/*
+			 * linux,default-trigger = "heartbeat"
+			 * 使用内核 LED 触发器的 "heartbeat" 模式：
+			 *   - 随 CPU 负载变化闪烁（空闲慢闪，忙碌快闪）
+			 *   - 等同于: echo heartbeat > /sys/class/leds/cpu/trigger
+			 * 支持的其他触发器: "none" "mmc0" "timer" "default-on" "oneshot" 等
+			 */
 			linux,default-trigger = "heartbeat";
 		};
+
+		/*
+		 * ================================================================
+		 * my_led: 测试 LED，使用 LCD_DATA06 → GPIO3_IO11
+		 * ================================================================
+		 * 引脚来源: 原本为 24 位 LCD 数据线的 D6，由于 LCD overlay
+		 * 已被禁用（uEnv.txt 中注释掉了加载），该引脚空闲可用。
+		 *
+		 * 此节点不需要写 compatible，因为父节点 leds 已经声明了
+		 * compatible = "gpio-leds"，内核 leds-gpio 驱动会自动
+		 * 为每个子节点创建一个 LED class device。
+		 */
+		my_led {
+			/*
+			 * label 决定了 /sys/class/leds/ 下的目录名:
+			 *   /sys/class/leds/my_led/
+			 *    - brightness  (读写: 0=灭, 1=亮)
+			 *    - trigger     (读写: 设置触发模式)
+			 *    - max_brightness
+			 */
+			label = "my_led";
+			/*
+			 * gpios 三要素:
+			 *   <&gpio3>  — GPIO Bank 3 控制器
+			 *              （来源: MX6UL_PAD_LCD_DATA06 在 ALT5 下 = GPIO3_IO11）
+			 *   11        — Bank 3 内的引脚号
+			 *   GPIO_ACTIVE_LOW — 低电平点亮 LED，高电平熄灭
+			 *                      （阳极端接 3.3V，阴极端接 GPIO，通过限流电阻）
+			 */
+			gpios = <&gpio3 11 GPIO_ACTIVE_LOW>;
+			/*
+			 * linux,default-trigger = "heartbeat"
+			 * 设为心跳模式，LED 会自动以固定节奏闪烁。
+			 * 这样无需编写任何驱动或用户态程序即可验证硬件连接。
+			 * 确认方法:
+			 *   板子上 LED 闪烁  → 硬件 OK。
+			 *   cat /sys/class/leds/my_led/trigger → 查看当前触发器。
+			 *   echo none > /sys/class/leds/my_led/trigger → 停闪。
+			 *   echo 1 > /sys/class/leds/my_led/brightness → 手动亮。
+			 */
+			linux,default-trigger = "heartbeat";
+		};
+	};
+
+	my_control_led{
+		compatible = "test,my-led"; //和驱动中 of_device_id 结构体的 compatible 字段对应
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_my_control_led>; //选择gpio的配置，这个配置写在iomuxc节点中
+		gpios = <&gpio3 13 GPIO_ACTIVE_LOW>; //用于devm_gpiod_get获取GPIO属性
 	};
 
 
@@ -319,11 +403,86 @@
 			MX6UL_PAD_NAND_DATA07__USDHC2_DATA7 0x170f9
 		>;
 	};
+
+	/*
+	 * ================================================================
+	 * 系统心跳 LED 引脚配置
+	 * ================================================================
+	 * 宏: MX6ULL_PAD_SNVS_TAMPER3__GPIO5_IO03
+	 *   来源: arch/arm/boot/dts/imx6ull-pinfunc-snvs.h
+	 *   ALT5 → GPIO5_IO03
+	 */
 	pinctrl_led: ledgrp {
 			fsl,pins = <
 				MX6ULL_PAD_SNVS_TAMPER3__GPIO5_IO03 0x1b0b0
 			>;
 		};
+
+	/*
+	 * ================================================================
+	 * p测试 LED 引脚配置 — LCD_DATA06 → GPIO3_IO11
+	 * ================================================================
+	 *
+	 * 引脚来源：LCD_DATA06，原本属于 LCD 24条数据线之一。
+	 * 由于 LCD overlay (imx-fire-lcd-overlay.dtbo) 已在 uEnv.txt
+	 * 中禁用后不再加载，该引脚现在是空闲 GPIO，可用于任意外设。
+	 *
+	 * ─── 宏定义（来源文件）────────────────────────────────────
+	 *   arch/arm/boot/dts/imx6ul-pinfunc.h 第 541 行:
+	 *     #define MX6UL_PAD_LCD_DATA06__GPIO3_IO11 \
+	 *             0x0130 0x03bc 0x0000 5 0
+	 *
+	 * ─── 宏参数含义 ──────────────────────────────────────────
+	 *   (imx6ul-pinfunc.h 第 13-16 行注释说明)
+	 *
+	 *   字段       | 值     | 含义
+	 *   -----------|--------|----------------------------------
+	 *   mux_reg    | 0x0130 | IOMUXC_SW_MUX_CTL 寄存器偏移地址
+	 *              |        | 写入 ALT5 值 → 引脚复用为 GPIO3_IO11
+	 *   conf_reg   | 0x03bc | IOMUXC_SW_PAD_CTL 寄存器偏移地址
+	 *              |        | 下方 0x1b0b0 写入此寄存器，配置电气特性
+	 *   input_reg  | 0x0000 | 无输入 daisy chain 选择寄存器
+	 *              |        | (输出模式不需要，仅输入模式使用)
+	 *   mux_mode   | 5      | ALT5: 将引脚功能切换到 GPIO3_IO11
+	 *              |        | MUX 模式对应关系见 i.MX6ULL RM 表
+	 *              |        | ALT0=LCD_DATA06, ALT5=GPIO3_IO11
+	 *   input_val  | 0      | 无关 (GPIO 用作输出时忽略此字段)
+	 *
+	 * ─── Pad 控制值 0x1b0b0 位域详解 ──────────────────────────
+	 *   参考: i.MX6ULL Reference Manual, Chapter 30 IOMUXC
+	 *         IOMUXC_SW_PAD_CTL_PAD_LCD_DATA06 寄存器
+	 *
+	 *   0x0001b0b0 = 0b 0000 0000 0000 0001 1011 0000 1011 0000
+	 *
+	 *   BIT      | 字段名 | 值  | 含义 & 选值理由
+	 *   ---------|--------|-----|--------------------------------
+	 *   0        | SRE    | 0   | 慢速压摆率。GPIO 切换频率低,
+	 *            |        |     | 慢摆率减少 EMI 辐射。
+	 *   3-5      | DSE    | 011 | 驱动强度: R0/4 (中等偏弱)。
+	 *            |        |     | 仅驱动一个 LED，不需大电流。
+	 *   6-7      | SPEED  | 01  | 带宽: 50MHz (低速)。
+	 *            |        |     | GPIO 翻转速度远低于 50MHz。
+	 *   11       | ODE    | 0   | 开漏输出关闭。使用标准推挽输出,
+	 *            |        |     | GPIO 直接驱动 LED 阴极。
+	 *   12       | PKE    | 1   | 使能上拉/保持器。
+	 *   13       | PUE    | 1   | 选择上拉 (而非保持器)。
+	 *            |        |     | 默认上拉 → IO 高电平 → LED 灭。
+	 *   [14:15]  | PUS    | 01  | 上拉电阻: 47KΩ。
+	 *            |        |     | (PUS=00→100K, 01→47K, 10→100K, 11→22K)
+	 *   16       | HYS    | 1   | 输入施密特触发器使能。
+	 *            |        |     | 虽然是输出引脚，使能可增加噪声容忍。
+	 */
+	pinctrl_my_led: my_ledgrp {
+		fsl,pins = <
+			MX6UL_PAD_LCD_DATA06__GPIO3_IO11  0x1b0b0
+		>;
+	};
+
+	pinctrl_my_control_led: my_control_ledgrp {
+		fsl,pins = <
+			MX6UL_PAD_LCD_DATA08__GPIO3_IO13  0x1b0b0 /* 前面来自官方的dtsi 后面的数据要看芯片手册 */
+		>;	
+	};
 };
 
 &iomuxc_snvs {

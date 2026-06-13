@@ -47,6 +47,7 @@ dtbo-$(CONFIG_SOC_IMX6ULL) += \
 	imx-fire-uart6.dtbo		\
 	imx-fire-uart7.dtbo		\
 	imx-fire-uart8.dtbo		\
+	imx-key-oled.dtbo	\
 
 targets += dtbs dtbs_install
 targets += $(dtbo-y)
