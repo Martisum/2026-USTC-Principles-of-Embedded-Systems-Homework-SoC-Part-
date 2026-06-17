@@ -165,14 +165,6 @@
 		};
 	};
 
-	my_control_led{
-		compatible = "test,my-led"; //和驱动中 of_device_id 结构体的 compatible 字段对应
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_my_control_led>; //选择gpio的配置，这个配置写在iomuxc节点中
-		gpios = <&gpio3 13 GPIO_ACTIVE_LOW>; //用于devm_gpiod_get获取GPIO属性
-	};
-
-
 	/* External sound card */
 	sound: sound {
 				status = "disabled";
@@ -476,12 +468,6 @@
 		fsl,pins = <
 			MX6UL_PAD_LCD_DATA06__GPIO3_IO11  0x1b0b0
 		>;
-	};
-
-	pinctrl_my_control_led: my_control_ledgrp {
-		fsl,pins = <
-			MX6UL_PAD_LCD_DATA08__GPIO3_IO13  0x1b0b0 /* 前面来自官方的dtsi 后面的数据要看芯片手册 */
-		>;	
 	};
 };
 

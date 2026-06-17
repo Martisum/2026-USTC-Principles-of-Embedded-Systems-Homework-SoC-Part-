@@ -1,0 +1,73 @@
+/dts-v1/;
+/plugin/;
+
+#include "../imx6ul-pinfunc.h"
+#include "dt-bindings/gpio/gpio.h"
+
+/{
+	/* ============================================================
+	 * I2C3 引脚（LCD_DATA00/01）的 pinctrl 由野火
+	 * imx-fire-i2c3.dtbo 中的 pinctrl_i2c3 节点提供,
+	 * 本 overlay 不重复配置。
+	 */
+	fragment@0 {
+		target = <&iomuxc>;
+		__overlay__ {
+			/* ─── I2C3 引脚配置 (对齐裸机工作值) ────────
+				*
+				* 裸机 PAD_CTL_I2C_OD 对应值 0x40007890:
+				*
+				* 0x40007890 = 0b 0100 0000 0000 0000 0111 1000 1001 0000
+				*
+				* BIT  | 字段  | 值 | 含义
+				* ─────|───────|────|───────────────────────────────
+				*  0   | SRE   | 0  | 慢速压摆率
+				*  3-5 | DSE   |010 | 驱动强度 R0/4
+				*  6-7 | SPEED |10  | 100MHz 带宽
+				* 11   | ODE   | 1  | 开漏使能 (I2C 必需)
+				* 12   | PKE   | 1  | 使能上拉/保持器
+				* 13   | PUE   | 1  | 上拉使能
+				* 14-15| PUS   |01  | 47KΩ 上拉 (裸机验证值)
+				* 16   | HYS   | 0  | 无迟滞 (I2C 不需要)
+				* 30   | SION  | 1  | 强制使能输入通路
+				*/
+			pinctrl_i2c3_oled: i2c3_oledgrp {
+				fsl,pins = <
+					MX6UL_PAD_LCD_DATA00__I2C3_SDA  0x40007890
+					MX6UL_PAD_LCD_DATA01__I2C3_SCL  0x40007890
+				>;
+			};
+		};
+	};
+
+	/* ============================================================
+	 * fragment@1: 使能 I2C3 控制器, 使用裸机验证的 PAD_CTL
+	 * 注意: 不要在此处修改 compatible!
+	 * compatible = "fsl,imx6ul-i2c", "fsl,imx21-i2c" 已在
+	 * imx6ull.dtsi 中定义, 用于绑定 i2c-imx 控制器驱动。
+	 * ============================================================ */
+	fragment@1 {
+		target = <&i2c3>;
+		__overlay__ {
+			clock_frequency = <100000>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl_i2c3_oled>;
+			status = "okay";
+		};
+	};
+
+	/* ============================================================
+	 * fragment@2: 创建 OLED 平台设备节点
+	 * compatible = "ustc-embed,oled" 与 oled_driver.c 中
+	 * oled_of_match[] 一致, 内核将其创建为 platform_device
+	 * 并触发 key_oled_probe() 回调。
+	 * ============================================================ */
+	fragment@2 {
+		target-path = "/";
+		__overlay__ {
+			oled {
+				compatible = "ustc-embed,oled";
+			};
+		};
+	};
+};
