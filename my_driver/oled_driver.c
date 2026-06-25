@@ -11,6 +11,7 @@
 #include <linux/i2c.h>
 #include <linux/delay.h>
 #include <linux/string.h>
+#include <linux/slab.h>
 #include <linux/workqueue.h>
 
 #include "oled.h"
@@ -56,9 +57,11 @@ static void display_work_func(struct work_struct *ws)
 	oled_display(priv);
 }
 
-/* ─── file_operations (预留, 当前均为空桩) ──────────────────── */
+/* ─── file_operations ────────────────────────────────────────── */
 static int key_oled_open(struct inode *inode, struct file *filp)
 {
+	if (isInitialized)
+		oled_clear();
 	return 0;
 }
 
@@ -71,6 +74,59 @@ static ssize_t key_oled_read(struct file *filp, char __user *buf,
 static ssize_t key_oled_write(struct file *filp, const char __user *buf,
 			      size_t cnt, loff_t *offt)
 {
+	char *kbuf, *p, *seg;
+	char *comma1, *comma2;
+	int x, y;
+
+	if (cnt == 0)
+		return 0;
+
+	kbuf = kzalloc(cnt + 1, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	if (copy_from_user(kbuf, buf, cnt)) {
+		kfree(kbuf);
+		return -EFAULT;
+	}
+	kbuf[cnt] = '\0';
+
+	/* 去掉末尾的换行符 */
+	while (cnt > 0 && (kbuf[cnt - 1] == '\n' || kbuf[cnt - 1] == '\r'))
+		kbuf[--cnt] = '\0';
+
+	/* 按 ';' 分割, 逐段解析 "X,Y,string" */
+	p = kbuf;
+	while ((seg = strsep(&p, ";")) != NULL) {
+		if (*seg == '\0')
+			continue;
+
+		comma1 = strchr(seg, ',');
+		if (!comma1)
+			continue;
+		*comma1 = '\0';
+
+		comma2 = strchr(comma1 + 1, ',');
+		if (!comma2) {
+			*comma1 = ',';
+			continue;
+		}
+		*comma2 = '\0';
+
+		if (kstrtoint(seg, 10, &x) != 0 ||
+		    kstrtoint(comma1 + 1, 10, &y) != 0) {
+			*comma1 = ',';
+			*comma2 = ',';
+			continue;
+		}
+
+		oled_show_string((uint16_t)x, (uint16_t)y, comma2 + 1);
+
+		*comma1 = ',';
+		*comma2 = ',';
+	}
+
+	kfree(kbuf);
 	return cnt;
 }
 
